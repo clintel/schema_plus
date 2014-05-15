@@ -52,6 +52,7 @@ module SchemaPlus
         tables_without_schema_plus(nil)
 
         @connection.views.each do |view_name|
+          next if Array.wrap(::ActiveRecord::SchemaDumper.ignore_tables).any? {|pattern| view_name.match pattern}
           definition = @connection.view_definition(view_name)
           @table_dumps[view_name] = "  create_view #{view_name.inspect}, #{definition.inspect}, :force => true\n"
         end
@@ -64,7 +65,10 @@ module SchemaPlus
             @inline_fks[table] = @connection.foreign_keys(table)
             dependencies = @inline_fks[table].collect(&:references_table_name)
           end
-          @dump_dependencies[table] = dependencies.sort.uniq - ::ActiveRecord::SchemaDumper.ignore_tables
+          # select against @table_dumps keys to respect filtering based on
+          # SchemaDumper.ignore_tables (which was taken into account
+          # increate @table_dumps)
+          @dump_dependencies[table] = dependencies.sort.uniq.select {|name| @table_dumps.has_key? name}
         end
 
         # Normally we dump foreign key constraints inline in the table
@@ -101,7 +105,7 @@ module SchemaPlus
         stream_string = stream.string
         @connection.columns(table).each do |column|
           if !column.default_expr.nil?
-            stream_string.gsub!("\"#{column.name}\"", "\"#{column.name}\", :default => { :expr => \"#{column.default_expr}\" }")
+            stream_string.gsub!("\"#{column.name}\"", "\"#{column.name}\", :default => { :expr => #{column.default_expr.inspect} }")
           end
         end
         @table_dumps[table] = stream_string
@@ -115,25 +119,25 @@ module SchemaPlus
       def dump_indexes(table) #:nodoc:
         @connection.indexes(table).collect{ |index|
           dump = "    t.index"
+          dump << " #{index.columns.inspect}," unless index.columns.blank?
+          dump << " :name => #{index.name.inspect}"
+          dump << ", :unique => true" if index.unique
+          dump << ", :kind => \"#{index.kind}\"" unless index.kind.blank?
           unless index.columns.blank? 
-            dump << " #{index.columns.inspect}, :name => #{index.name.inspect}"
-            dump << ", :unique => true" if index.unique
-            dump << ", :kind => \"#{index.kind}\"" unless index.kind.blank?
             dump << ", :case_sensitive => false" unless index.case_sensitive?
             dump << ", :conditions => #{index.conditions.inspect}" unless index.conditions.blank?
             index_lengths = index.lengths.compact if index.lengths.is_a?(Array)
             dump << ", :length => #{Hash[*index.columns.zip(index.lengths).flatten].inspect}" if index_lengths.present?
+            dump << ", :order => {" + index.orders.map{|column, val| "#{column.inspect} => #{val.inspect}"}.join(", ") + "}" unless index.orders.blank?
           else
-            dump << " :name => #{index.name.inspect}"
-            dump << ", :kind => \"#{index.kind}\"" unless index.kind.blank?
             dump << ", :expression => #{index.expression.inspect}"
           end
           dump << "\n"
-        }.join
+        }.sort.join
       end
 
       def dump_foreign_keys(foreign_keys, opts={}) #:nodoc:
-        foreign_keys.collect{ |foreign_key| "  " + foreign_key.to_dump(:inline => opts[:inline]) }.join
+        foreign_keys.collect{ |foreign_key| "  " + foreign_key.to_dump(:inline => opts[:inline]) }.sort.join
       end
     end
   end

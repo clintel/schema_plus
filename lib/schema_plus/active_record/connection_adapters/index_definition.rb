@@ -22,7 +22,7 @@ module SchemaPlus
           # same args as add_index(table_name, column_names, options)
           if args.length == 3 and Hash === args.last
             table_name, column_names, options = args + [{}]
-            initialize_without_schema_plus(table_name, options[:name], options[:unique], column_names, options[:lengths])
+            initialize_without_schema_plus(table_name, options[:name], options[:unique], column_names, options[:length], options[:orders])
             @conditions = options[:conditions]
             @expression = options[:expression]
             @kind = options[:kind]
@@ -38,7 +38,7 @@ module SchemaPlus
           opts = {}
           opts[:name]           = name unless name.nil?
           opts[:unique]         = unique unless unique.nil?
-          opts[:lengths]        = lengths unless lengths.nil?
+          opts[:length]         = lengths unless lengths.nil?
           opts[:conditions]     = conditions unless conditions.nil?
           opts[:expression]     = expression unless expression.nil?
           opts[:kind]           = kind unless kind.nil?
@@ -48,6 +48,7 @@ module SchemaPlus
 
         # tests if the corresponding indexes would be the same
         def ==(other)
+          return false if other.nil?
           return false unless self.name == other.name
           return false unless Array.wrap(self.columns).collect(&:to_s).sort == Array.wrap(other.columns).collect(&:to_s).sort
           return false unless !!self.unique == !!other.unique

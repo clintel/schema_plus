@@ -1,9 +1,22 @@
 require File.expand_path(File.dirname(__FILE__) + '/spec_helper')
 
-require 'models/user'
-
 describe "Column" do
+
+  before(:all) do
+      class User < ::ActiveRecord::Base ; end
+  end
+    
   let(:migration) { ::ActiveRecord::Migration }
+
+  context "JSON serialization" do
+    before(:each) do
+      create_table(User, :login => { :index => true})
+      @login = User.columns.find{|column| column.name == "login"}
+    end
+    it "works properly" do
+      JSON.parse(@login.to_json).should include("name" => "login", "type" => "string")
+    end
+  end
 
   context "regarding indexes" do
 
@@ -75,13 +88,47 @@ describe "Column" do
       User.columns.find{|column| column.name == "login"}.required_on.should == :save
     end
 
-    it "must have a value on :updae if there's default" do
+    it "must have a value on :update if there's default" do
       create_table(User, :login => { :null => false, :default => "foo" })
       User.columns.find{|column| column.name == "login"}.required_on.should == :update
     end
 
   end
 
+  context "using DB_DEFAULT" do
+
+    before(:each) do
+      create_table(User, :alpha => { :default => "gabba" }, :beta => {})
+    end
+
+    if SchemaPlusHelpers.sqlite3?
+      it "creating a record should raise an error" do
+        expect { User.create!(:alpha => ActiveRecord::DB_DEFAULT, :beta => "hello") }.to raise_error ActiveRecord::StatementInvalid
+      end
+      it "updating a record should raise an error" do
+        u = User.create!(:alpha => "hey", :beta => "hello")
+        expect { u.update_attributes(:alpha => ActiveRecord::DB_DEFAULT, :beta => "goodbye") }.to raise_error ActiveRecord::StatementInvalid
+      end
+    else
+
+      it "creating a record should respect default expression" do
+        User.create!(:alpha => ActiveRecord::DB_DEFAULT, :beta => "hello")
+        User.last.alpha.should == "gabba"
+        User.last.beta.should == "hello"
+      end
+
+      it "updating a record should respect default expression" do
+        u = User.create!(:alpha => "hey", :beta => "hello")
+        u.reload
+        u.alpha.should == "hey"
+        u.beta.should == "hello"
+        u.update_attributes(:alpha => ActiveRecord::DB_DEFAULT, :beta => "goodbye")
+        u.reload
+        u.alpha.should == "gabba"
+        u.beta.should == "goodbye"
+      end
+    end
+  end
 
   protected
 

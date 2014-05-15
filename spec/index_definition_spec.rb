@@ -6,7 +6,27 @@ describe "Index definition" do
   let(:migration) { ::ActiveRecord::Migration }
   
   before(:all) do
-    load_core_schema
+    define_schema(:auto_create => false) do
+      create_table :users, :force => true do |t|
+        t.string :login
+        t.datetime :deleted_at
+      end
+
+      create_table :posts, :force => true do |t|
+        t.text :body
+        t.integer :user_id
+        t.integer :author_id
+      end
+
+      create_table :comments, :force => true do |t|
+        t.text :body
+        t.integer :post_id
+        t.foreign_key :post_id, :posts, :id
+      end
+    end
+    class User < ::ActiveRecord::Base ; end
+    class Post < ::ActiveRecord::Base ; end
+    class Comment < ::ActiveRecord::Base ; end
   end
 
   around(:each) do |example|
@@ -27,7 +47,7 @@ describe "Index definition" do
     end
 
     it "is included in User.indexes" do
-      User.indexes.select { |index| index.columns == %w[login deleted_at] }.should have(1).item
+      @index.should_not be_nil
     end
 
   end
@@ -40,6 +60,38 @@ describe "Index definition" do
       query.should raise_error
     end
   end
+
+  it "should not crash on equality test with nil" do
+    index = ActiveRecord::ConnectionAdapters::IndexDefinition.new(:table, :column)
+    expect{index == nil}.to_not raise_error
+    (index == nil).should be_false
+  end
+
+
+  unless SchemaPlusHelpers.mysql?
+    context "when index is ordered" do
+
+      quotes = [
+        ["unquoted", ''],
+        ["double-quoted", '"'],
+      ]
+      quotes += [
+        ["single-quoted", "'"],
+        ["back-quoted", '`']
+      ] if SchemaPlusHelpers.sqlite3?
+
+      quotes.each do |quotename, quote|
+        it "index definition includes orders for #{quotename} columns" do
+          migration.execute "CREATE INDEX users_login_index ON users (#{quote}login#{quote} DESC, #{quote}deleted_at#{quote} ASC)"
+          User.reset_column_information
+          index = index_definition(%w[login deleted_at])
+          index.orders.should == {"login" => :desc, "deleted_at" => :asc}
+        end
+
+      end
+    end
+  end
+
 
   if SchemaPlusHelpers.postgresql?
 
@@ -127,6 +179,31 @@ describe "Index definition" do
       end
 
     end
+
+    context "when index has a non-btree type" do
+      before(:each) do
+        migration.execute "CREATE INDEX users_login_index ON users USING hash(login)"
+        User.reset_column_information
+        @index = User.indexes.detect { |i| i.name == "users_login_index" }
+      end
+
+      it "exists" do
+        @index.should_not be_nil
+      end
+
+      it "defines kind" do
+        @index.kind.should == "hash"
+      end
+
+      it "does not define expression" do
+        @index.expression.should be_nil
+      end
+
+      it "does not define order" do
+        @index.orders.should be_blank
+      end
+    end
+
 
   end # of postgresql specific examples
 

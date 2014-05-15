@@ -7,10 +7,10 @@ ActiveRecord::Base.configurations = {
   'schema_plus' => {
     :adapter => 'postgresql',
     :username => ENV['POSTGRES_DB_USER'],
-    :database => 'schema_plus_unittest',
+    :database => 'schema_plus_test',
     :min_messages => 'warning'
   }
 
 }
 
-ActiveRecord::Base.establish_connection 'schema_plus'
+ActiveRecord::Base.establish_connection :schema_plus

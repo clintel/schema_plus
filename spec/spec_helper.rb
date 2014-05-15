@@ -1,8 +1,8 @@
-if RUBY_VERSION > "1.9"
-  require 'simplecov'
-  require 'simplecov-gem-adapter'
-  SimpleCov.start "gem"
-end
+require 'simplecov'
+require 'simplecov-gem-adapter'
+SimpleCov.use_merging true
+SimpleCov.merge_timeout 3600
+SimpleCov.start "gem"
 
 require 'pry'
 
@@ -21,30 +21,31 @@ RSpec.configure do |config|
   config.include(SchemaPlusHelpers)
 end
 
-def load_schema(name)
-  ActiveRecord::Migration.suppress_messages do
-    eval(File.read(File.join(File.dirname(__FILE__), 'schema', name)))
+def with_fk_config(opts, &block)
+  save = Hash[opts.keys.collect{|key| [key, SchemaPlus.config.foreign_keys.send(key)]}]
+  begin
+    SchemaPlus.config.foreign_keys.update_attributes(opts)
+    yield
+  ensure
+    SchemaPlus.config.foreign_keys.update_attributes(save)
   end
 end
 
-def load_core_schema
-  SchemaPlus.setup do |config|
-    config.foreign_keys.auto_create = false;
-  end
-  load_schema('core_schema.rb')
-  load 'models/user.rb'
-  load 'models/post.rb'
-  load 'models/comment.rb'
+def with_fk_auto_create(value = true, &block)
+  with_fk_config(:auto_create => value, &block)
 end
 
-def load_auto_schema
-  SchemaPlus.setup do |config|
-    config.foreign_keys.auto_create = true;
+def define_schema(config={}, &block)
+  with_fk_config(config) do
+    ActiveRecord::Migration.suppress_messages do
+      ActiveRecord::Schema.define do
+        connection.tables.each do |table|
+          drop_table table, :cascade => true
+        end
+        instance_eval &block
+      end
+    end
   end
-  load_schema('auto_schema.rb')
-  load 'models/user.rb'
-  load 'models/post.rb'
-  load 'models/comment.rb'
 end
 
 def remove_all_models
@@ -56,4 +57,4 @@ def remove_all_models
     end
   end
 
-SimpleCov.command_name ActiveRecord::Base.connection.adapter_name if defined? SimpleCov
+SimpleCov.command_name "[ruby #{RUBY_VERSION} - ActiveRecord #{::ActiveRecord::VERSION::STRING} - #{ActiveRecord::Base.connection.adapter_name}]"

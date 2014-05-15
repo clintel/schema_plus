@@ -1,5 +1,8 @@
 require File.expand_path(File.dirname(__FILE__) + '/spec_helper')
 
+class Item < ActiveRecord::Base
+end
+
 class AOnes < ActiveRecord::Base
 end
 
@@ -13,13 +16,6 @@ describe ActiveRecord do
   let(:migration) { ActiveRecord::Migration }
 
   let(:connection) { ActiveRecord::Base.connection }
-
-  let (:dump) {
-    StringIO.open { |stream|
-      ActiveRecord::SchemaDumper.dump(ActiveRecord::Base.connection, stream)
-      stream.string
-    }
-  }
 
   context "views" do
 
@@ -35,6 +31,7 @@ describe ActiveRecord do
     end
 
     it "should instrospect" do
+      # for postgresql, ignore views named pg_*
       connection.views.sort.should == %W[a_ones ab_ones]
       connection.view_definition('a_ones').should match(%r{^SELECT .*b.*,.*s.* FROM .*items.* WHERE .*a.* = 1}i)
       connection.view_definition('ab_ones').should match(%r{^SELECT .*s.* FROM .*a_ones.* WHERE .*b.* = 1}i)
@@ -54,6 +51,14 @@ describe ActiveRecord do
     it "should be included in schema dump in dependency order" do
       dump.should match(%r{create_table "items".*create_view "a_ones".*create_view "ab_ones"}m) 
     end
+
+    it "should not be included in schema if listed in ignore_tables" do
+      dump(ignore_tables: /b_/) do |dump|
+        dump.should match(%r{create_view "a_ones", "SELECT .*b.*,.*s.* FROM .*items.* WHERE .*a.* = 1.*, :force => true}i)
+        dump.should_not match(%r{"ab_ones"})
+      end
+    end
+
 
     it "dump should not reference current database" do
       # why check this?  mysql default to providing the view definition
@@ -131,7 +136,7 @@ describe ActiveRecord do
   def define_schema_and_data
     migration.suppress_messages do
       connection.views.each do |view| connection.drop_view view end
-      connection.tables.each do |table| connection.drop_table table end
+      connection.tables.each do |table| connection.drop_table table, cascade: true end
 
       schema.define do
 
@@ -141,8 +146,9 @@ describe ActiveRecord do
           t.string  :s
         end
 
-        create_view :a_ones, "select b, s from items where a = 1"
+        create_view :a_ones, Item.select('b, s').where(:a => 1)
         create_view :ab_ones, "select s from a_ones where b = 1"
+        create_view :pg_dummy_internal, "select 1" if SchemaPlusHelpers.postgresql?
       end
     end
     connection.execute "insert into items (a, b, s) values (1, 1, 'one_one')"
@@ -158,13 +164,16 @@ describe ActiveRecord do
         drop_view "ab_ones"
         drop_view "a_ones"
         drop_table "items"
+        drop_view :pg_dummy_internal if SchemaPlusHelpers.postgresql?
       end
     end
   end
 
-  def dump
+  def dump(opts={})
     StringIO.open { |stream|
+      ActiveRecord::SchemaDumper.ignore_tables = Array.wrap(opts[:ignore_tables])
       ActiveRecord::SchemaDumper.dump(ActiveRecord::Base.connection, stream)
+      yield stream.string if block_given?
       stream.string
     }
   end

@@ -9,6 +9,10 @@ module SchemaPlus
       #   :set_null
       #   :set_default
       #   :no_action
+      #
+      # The deferrable attribute can take on the following values:
+      #   true
+      #   :initially_deferred
       class ForeignKeyDefinition
 
         # The name of the foreign key constraint
@@ -46,9 +50,9 @@ module SchemaPlus
         def initialize(name, table_name, column_names, references_table_name, references_column_names, on_update = nil, on_delete = nil, deferrable = nil)
           @name = name
           @table_name = unquote(table_name)
-          @column_names = unquote(column_names)
+          @column_names = unquote(Array.wrap(column_names))
           @references_table_name = unquote(references_table_name)
-          @references_column_names = unquote(references_column_names)
+          @references_column_names = unquote(Array.wrap(references_column_names))
           @on_update = on_update
           @on_delete = on_delete
           @deferrable = deferrable
@@ -66,9 +70,9 @@ module SchemaPlus
           dump = (opts[:inline] ? "  t.foreign_key" : "add_foreign_key #{table_name.inspect},")
           dump << " [#{Array(column_names).collect{ |name| name.inspect }.join(', ')}]"
           dump << ", #{references_table_name.inspect}, [#{Array(references_column_names).collect{ |name| name.inspect }.join(', ')}]"
-          dump << ", :on_update => :#{on_update}" if on_update
-          dump << ", :on_delete => :#{on_delete}" if on_delete
-          dump << ", :deferrable => #{deferrable}" if deferrable
+          dump << ", :on_update => #{on_update.inspect}" if on_update
+          dump << ", :on_delete => #{on_delete.inspect}" if on_delete
+          dump << ", :deferrable => #{deferrable.inspect}" if deferrable
           dump << ", :name => #{name.inspect}" if name
           dump << "\n"
           dump
@@ -80,6 +84,7 @@ module SchemaPlus
           sql << " ON UPDATE #{ACTIONS[on_update]}" if on_update
           sql << " ON DELETE #{ACTIONS[on_delete]}" if on_delete
           sql << " DEFERRABLE" if deferrable
+          sql << " INITIALLY DEFERRED" if deferrable == :initially_deferred
           sql
         end
 
@@ -105,6 +110,27 @@ module SchemaPlus
 
         def __unquote(value)
           value.to_s.sub(/^["`](.*)["`]$/, '\1')
+        end
+
+        def self.default_name(table_name, column_names)
+          "fk_#{fixup_schema_name(table_name)}_#{Array.wrap(column_names).join('_and_')}"
+        end
+
+        def self.auto_index_name(table_name, column_name)
+          "fk__#{fixup_schema_name(table_name)}_#{Array.wrap(column_name).join('_and_')}"
+        end
+
+        def self.fixup_schema_name(table_name)
+          # replace . with _
+          table_name.to_s.gsub(/[.]/, '_')
+        end
+
+        def ==(other) # note equality test ignores :name and options
+          [:table_name,
+           :column_names,
+           :references_table_name,
+           :references_column_names
+           ].all? { |attr| self.send(attr) == other.send(attr) }
         end
       end
     end

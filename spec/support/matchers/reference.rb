@@ -19,22 +19,26 @@ module SchemaPlusMatchers
       else
         @result = @model.foreign_keys
       end
-      if @column_names 
-        @result.any? do |fk| 
-          fk.column_names == @column_names &&
-            (@on_update ? fk.on_update == @on_update : true) &&
-            (@on_delete ? fk.on_delete == @on_delete : true)
-        end
-      else
-        !@result.empty?
-      end
+      @result.keep_if {|fk| fk.column_names == @column_names } if @column_names
+      @result.keep_if {|fk| fk.on_update == @on_update } if @on_update
+      @result.keep_if {|fk| fk.on_delete == @on_delete } if @on_delete
+      @result.keep_if {|fk| fk.deferrable == @deferrable } if @deferrable
+      @result.keep_if {|fk| fk.name == @name } if @name
+      !@result.empty?
     end
 
     def failure_message_for_should(should_not = false)
       target_column_names = @column_names.present? ? "(#{@column_names.join(', ')})" : "" 
       destinantion_column_names = @references_table_name ? "#{@references_table_name}(#{@references_column_names.join(', ')})" : "anything"
       invert = should_not ? 'not' : ''
-      "Expected #{@model.table_name}#{target_column_names} to #{invert} reference #{destinantion_column_names}"
+      msg = "Expected #{@model.table_name}#{target_column_names} to #{invert} reference #{destinantion_column_names}"
+      with = []
+      with << "on_update=#{@on_update.inspect}" if @on_update
+      with << "on_delete=#{@on_delete.inspect}" if @on_delete
+      with << "deferrable=#{@deferrable.inspect}" if @deferrable
+      with << "name=#{@name.inspect}" if @name
+      msg += " with #{with.join(" and ")}" if with.any?
+      msg
     end
 
     def failure_message_for_should_not
@@ -51,8 +55,18 @@ module SchemaPlusMatchers
       self
     end
 
+    def deferrable(action)
+      @deferrable = action
+      self
+    end
+
     def on_delete(action)
       @on_delete = action
+      self
+    end
+
+    def with_name(action)
+      @name = action
       self
     end
 

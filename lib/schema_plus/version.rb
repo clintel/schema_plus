@@ -1,3 +1,3 @@
 module SchemaPlus
-  VERSION = "0.4.1"
+  VERSION = "1.5.1"
 end

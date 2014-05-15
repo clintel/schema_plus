@@ -2,53 +2,95 @@ module SchemaPlus::ActiveRecord
   module ColumnOptionsHandler
     def schema_plus_handle_column_options(table_name, column_name, column_options, opts = {}) #:nodoc:
       config = opts[:config] || SchemaPlus.config
-      if references = get_references(table_name, column_name, column_options, config)
-        if index = column_options.fetch(:index, config.foreign_keys.auto_index?)
-          column_index(table_name, column_name, index)
-        end
-        add_foreign_key(table_name, column_name, references.first, references.last,
-                                    column_options.reverse_merge(:on_update => config.foreign_keys.on_update,
-                                                                 :on_delete => config.foreign_keys.on_delete))
-      elsif column_options[:index]
-        column_index(table_name, column_name, column_options[:index])
+      fk_args = get_fk_args(table_name, column_name, column_options, config)
+
+      # remove existing fk and auto-generated index in case of change to existing column
+      if fk_args # includes :none for explicitly off
+        remove_foreign_key_if_exists(table_name, column_name)
+        remove_auto_index_if_exists(table_name, column_name)
+      end
+
+      fk_args = nil if fk_args == :none
+
+      # create index if requested explicity or implicitly due to auto_index
+      index = column_options[:index]
+      if index.nil? and fk_args && config.foreign_keys.auto_index?
+        index = { :name => auto_index_name(table_name, column_name) }
+      end
+      column_index(table_name, column_name, index) if index
+
+      if fk_args
+        references = fk_args.delete(:references)
+        add_foreign_key(table_name, column_name, references.first, references.last, fk_args)
       end
     end
 
     protected
 
-    # If auto_create is true:
-    #   get_references('comments', 'post_id') # => ['posts', 'id']
-    #
-    # And if <tt>column_name</tt> is parent_id it references to the same table
-    #   get_references('pages', 'parent_id')  # => ['pages', 'id']
-    #
-    # If :references option is given, it is used (whether or not auto_create is true)
-    #   get_references('widgets', 'main_page_id', :references => 'pages')) => ['pages', 'id']
-    #
-    # Also the referenced id column may be specified:
-    #   get_references('addresses', 'member_id', :references => ['users', 'uuid']) => ['users', 'uuid']
-    #
-    def get_references(table_name, column_name, column_options = {}, config = {}) #:nodoc:
+    def get_fk_args(table_name, column_name, column_options = {}, config = {}) #:nodoc:
+
+      args = nil
+      column_name = column_name.to_s
+
+      if column_options.has_key?(:foreign_key)
+        args = column_options[:foreign_key]
+        return :none unless args
+        args = {} if args == true
+        return :none if args.has_key?(:references) and not args[:references]
+      end
+
+
       if column_options.has_key?(:references)
         references = column_options[:references]
-        references = [references, :id] unless references.nil? || references.is_a?(Array)
-        references
-      elsif config.foreign_keys.auto_create?
-        case column_name.to_s
-        when 'parent_id'
-          [table_name, :id]
-        when /^(.*)_id$/
-          determined_table_name = ActiveRecord::Base.pluralize_table_names ? $1.to_s.pluralize : $1
-          [determined_table_name, :id]
-        end
+        return :none unless references
+        args = (args || {}).reverse_merge(:references => references)
       end
+
+      args ||= {} if config.foreign_keys.auto_create? and column_name =~ /_id$/
+
+      return nil if args.nil?
+
+      args[:references] ||= table_name if column_name == 'parent_id'
+
+      args[:references] ||= begin
+                              table_name = column_name.sub(/_id$/, '')
+                              table_name = table_name.pluralize if ActiveRecord::Base.pluralize_table_names
+                              table_name
+                            end
+
+      args[:references] = [args[:references], :id] unless args[:references].is_a? Array
+
+      [:on_update, :on_delete, :deferrable].each do |shortcut|
+        args[shortcut] ||= column_options[shortcut] if column_options.has_key? shortcut
+      end
+
+      args[:on_update] ||= config.foreign_keys.on_update
+      args[:on_delete] ||= config.foreign_keys.on_delete
+
+      args
     end
+
+    def remove_foreign_key_if_exists(table_name, column_name) #:nodoc:
+      foreign_keys = ActiveRecord::Base.connection.foreign_keys(table_name.to_s) rescue [] # no fks if table_name doesn't exist
+      fk = foreign_keys.detect { |fk| fk.table_name == table_name.to_s && fk.column_names == Array(column_name).collect(&:to_s) }
+      remove_foreign_key(table_name, fk.column_names, fk.references_table_name, fk.references_column_names) if fk
+    end
+
 
     def column_index(table_name, column_name, options) #:nodoc:
       options = {} if options == true
       options = { :unique => true } if options == :unique
       column_name = [column_name] + Array.wrap(options.delete(:with)).compact
       add_index(table_name, column_name, options)
+    end
+
+    def remove_auto_index_if_exists(table_name, column_name)
+      name = auto_index_name(table_name, column_name)
+      remove_index(table_name, :name => name, :column => column_name, :if_exists => true)
+    end
+
+    def auto_index_name(table_name, column_name)
+      ConnectionAdapters::ForeignKeyDefinition.auto_index_name(table_name, column_name)
     end
 
   end

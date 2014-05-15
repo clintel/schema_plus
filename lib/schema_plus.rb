@@ -3,6 +3,7 @@ require 'valuable'
 require 'schema_plus/version'
 require 'schema_plus/active_record/base'
 require 'schema_plus/active_record/column_options_handler'
+require 'schema_plus/active_record/db_default'
 require 'schema_plus/active_record/foreign_keys'
 require 'schema_plus/active_record/connection_adapters/table_definition'
 require 'schema_plus/active_record/connection_adapters/schema_statements'
@@ -12,6 +13,7 @@ require 'schema_plus/active_record/connection_adapters/abstract_adapter'
 require 'schema_plus/active_record/connection_adapters/column'
 require 'schema_plus/active_record/connection_adapters/foreign_key_definition'
 require 'schema_plus/active_record/connection_adapters/index_definition'
+require 'schema_plus/active_record/migration/command_recorder'
 require 'schema_plus/railtie' if defined?(Rails::Railtie)
 
 module SchemaPlus
@@ -124,6 +126,18 @@ module SchemaPlus
     ::ActiveRecord::ConnectionAdapters::IndexDefinition.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::IndexDefinition)
     ::ActiveRecord::ConnectionAdapters::SchemaStatements.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::SchemaStatements)
     ::ActiveRecord::ConnectionAdapters::TableDefinition.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::TableDefinition)
+    ::ActiveRecord::Migration::CommandRecorder.send(:include, SchemaPlus::ActiveRecord::Migration::CommandRecorder)
+
+    if "#{::ActiveRecord::VERSION::MAJOR}.#{::ActiveRecord::VERSION::MINOR}".to_r >= "4.1".to_r
+      ::ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::AbstractAdapter::AddColumnOptions)
+    else
+      ::ActiveRecord::ConnectionAdapters::AbstractAdapter.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::AbstractAdapter::AddColumnOptions)
+    end
+
+    if ::ActiveRecord::VERSION::MAJOR.to_i >= 4
+      ::ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.send(:include, SchemaPlus::ActiveRecord::ConnectionAdapters::AbstractAdapter::VisitTableDefinition)
+    end
+
   end
 
   def self.insert #:nodoc:
@@ -133,6 +147,7 @@ module SchemaPlus
     ::ActiveRecord::Base.send(:include, SchemaPlus::ActiveRecord::Base)
     ::ActiveRecord::Schema.send(:include, SchemaPlus::ActiveRecord::Schema)
     ::ActiveRecord::SchemaDumper.send(:include, SchemaPlus::ActiveRecord::SchemaDumper)
+    ::ActiveRecord.const_set(:DB_DEFAULT, SchemaPlus::ActiveRecord::DB_DEFAULT)
   end
 
 end
