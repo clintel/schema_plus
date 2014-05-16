@@ -2,12 +2,37 @@ module SchemaPlus
   module ActiveRecord
     module ConnectionAdapters
       module SqlserverAdapter
-        def self.included(base) #:nodoc:
-          base.alias_method_chain :indexes, :schema_plus
+
+        module AddColumnOptions
+          def default_expr_valid?(expr)
+            true # arbitrary sql is okay in SQL Server
+          end
+
+          def sql_for_function(function)
+            case function
+              when :now
+                'current_timestamp'
+            end
+          end
         end
 
-        def foreign_key_definition_class
-          ForeignKeyDefinition
+        def self.included(base) #:nodoc:
+          base.alias_method_chain :indexes, :schema_plus
+          base.alias_method_chain :columns, :schema_plus
+        end
+
+        def drop_table(name, options={})
+          if options[:if_exists]
+            super(name, options.except(:cascade, :if_exists)) rescue nil
+          else
+            super(name, options.except(:cascade, :if_exists))
+          end
+        end
+
+        def columns_with_schema_plus(table, desc = nil) #:nodoc:
+          columns_without_schema_plus(table, desc).each do |col|
+            col.instance_variable_set(:@default_expr, col.default_function)
+          end
         end
 
         def indexes_with_schema_plus (table_name, name = nil) #:nodoc:
@@ -41,14 +66,6 @@ module SchemaPlus
 
         def reverse_foreign_keys (table_name, name = nil)
           load_foreign_keys(table_name, true, name)
-        end
-
-        def default_expr_valid? (expr)
-          true # constant expressions are allowed
-        end
-
-        def sql_for_function (function_name)
-          "GETDATE()" if function_name == :now
         end
 
         class ForeignKeyDefinition < SchemaPlus::ActiveRecord::ConnectionAdapters::ForeignKeyDefinition
